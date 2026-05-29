@@ -13,6 +13,7 @@ public class ClientHandler implements Runnable {
     private BufferedWriter writer;
     private String username;
     private boolean authenticated = false;
+    private volatile boolean running = true;
     private static final Map<String, String> users = new ConcurrentHashMap<>();
 
     public ClientHandler(Socket socket, ChatServer server) { this.socket = socket; this.server = server; }
@@ -21,13 +22,21 @@ public class ClientHandler implements Runnable {
         try {
             reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));
-            while (true) {
+            while (running) {
                 ProtocolMessage msg = MessageParser.readMessage(reader);
-                if (msg == null || msg.keys().isEmpty()) continue;
+                if (msg == null) {
+                    break;
+                }
+                if (msg.keys().isEmpty()) continue;
                 handle(msg);
             }
-        } catch (SocketTimeoutException e) { ChatServer.log("Timeout: " + username); disconnect();
-        } catch (Exception e) { disconnect(); }
+        } catch (SocketTimeoutException e) {
+            ChatServer.log("Timeout: " + (username != null ? username : "unknown"));
+        } catch (Exception ignored) {
+
+        } finally {
+            disconnect();
+        }
     }
 
     private void handle(ProtocolMessage msg) throws Exception {
@@ -38,22 +47,19 @@ public class ClientHandler implements Runnable {
             case "login": login(msg); break;
             case "message": ifAuth(() -> sendMessage(msg)); break;
             case "list": ifAuth(this::sendUserList); break;
-            case "logout": ifAuth(this::disconnect); break;
+            case "logout": ifAuth(() -> {
+                ProtocolMessage response = new ProtocolMessage();
+                response.put("Status", "success");
+                send(response);
+                disconnect();
+            }); break;
             case "upload": ifAuth(() -> {
-                try {
-                    uploadFile(msg);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+                try { uploadFile(msg); } catch (Exception e) { throw new RuntimeException(e); }
             }); break;
             case "download": ifAuth(() -> {
-                try {
-                    downloadFile(msg);
-                } catch (Exception e) {
-                    throw new RuntimeException(e);
-                }
+                try { downloadFile(msg); } catch (Exception e) { throw new RuntimeException(e); }
             }); break;
-            default: ChatServer.log("Unknown command: " + command); // ignore per spec
+            default: ChatServer.log("Unknown command: " + command);
         }
     }
 
@@ -65,7 +71,11 @@ public class ClientHandler implements Runnable {
     private void login(ProtocolMessage msg) throws Exception {
         username = msg.get("name");
         String password = msg.get("password");
-        if (username == null || username.isBlank()) { sendError("Username required"); disconnect(); return; }
+        if (username == null || username.isBlank()) {
+            sendError("Username required");
+            running = false;
+            return;
+        }
 
         String hash = HashUtil.sha256(password == null ? "" : password);
 
@@ -74,13 +84,13 @@ public class ClientHandler implements Runnable {
             ChatServer.log("New user registered: " + username);
         } else if (!users.get(username).equals(hash)) {
             sendError("Invalid password");
-            disconnect();
+            running = false;
             return;
         }
 
         if (server.getClient(username) != null && server.getClient(username) != this) {
             sendError("User already logged in");
-            disconnect();
+            running = false;
             return;
         }
 
@@ -91,18 +101,22 @@ public class ClientHandler implements Runnable {
 
         server.register(username, this);
 
+        for (ProtocolMessage m : server.getHistory()) {
+            send(m);
+        }
+
         ProtocolMessage event = new ProtocolMessage();
         event.put("Event", "userlogin");
         event.put("UserName", username);
         server.broadcast(event);
 
-        for (ProtocolMessage m : server.getHistory()) send(m);
         ChatServer.log("User logged in: " + username);
     }
 
     private void sendMessage(ProtocolMessage msg) {
         String text = msg.get("message");
         if (text == null || text.isBlank()) { sendError("Message cannot be empty"); return; }
+
 
         ProtocolMessage response = new ProtocolMessage();
         response.put("Status", "success");
@@ -142,7 +156,7 @@ public class ClientHandler implements Runnable {
         response.put("FileId", fileId);
         send(response);
 
-        byte[] bytes = java.util.Base64.getDecoder().decode(content);
+        byte[] bytes = java.util.Base64.getDecoder().decode(content.replace("\n", "").replace(" ", ""));
         ProtocolMessage event = new ProtocolMessage();
         event.put("Event", "file");
         event.put("FileId", fileId);
@@ -165,7 +179,7 @@ public class ClientHandler implements Runnable {
         response.put("Status", "success");
         response.put("FileId", fileId);
         response.put("Name", stored.get("name"));
-        response.put("MimeType", stored.get("mimetype"));
+        response.put("MimeType", stored.get("mimetype") != null ? stored.get("mimetype") : "application/octet-stream");
         response.put("Encoding", "base64");
         response.put("Content", stored.get("content"));
         send(response);
@@ -180,13 +194,19 @@ public class ClientHandler implements Runnable {
     }
 
     public synchronized void send(ProtocolMessage msg) {
-        try { writer.write(msg.serialize()); writer.flush(); }
-        catch (Exception e) { disconnect(); }
+        try {
+            writer.write(msg.serialize());
+            writer.flush();
+        } catch (Exception e) {
+            running = false;
+        }
     }
 
     private void disconnect() {
+        running = false;
         try {
             if (username != null && authenticated) {
+                authenticated = false;
                 server.unregister(username);
                 ProtocolMessage event = new ProtocolMessage();
                 event.put("Event", "userlogout");

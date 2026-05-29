@@ -15,12 +15,13 @@ public class ClientConnection {
     private final BufferedWriter writer;
     private final ChatWindow window;
     private boolean authenticated = false;
+    private volatile boolean running = true;
 
     public ClientConnection(String host, int port, String user, String pass, ChatWindow window) {
         try {
             this.window = window;
             socket = new Socket(host, port);
-            socket.setSoTimeout(30000);
+            socket.setSoTimeout(300000);
             reader = new BufferedReader(new InputStreamReader(socket.getInputStream()));
             writer = new BufferedWriter(new OutputStreamWriter(socket.getOutputStream()));
             login(user, pass);
@@ -62,7 +63,7 @@ public class ClientConnection {
             msg.put("Name", file.getName());
 
             String mime = Files.probeContentType(file.toPath());
-            if (mime != null) msg.put("MimeType", mime);
+            msg.put("MimeType", mime != null ? mime : "application/octet-stream");
 
             msg.put("Encoding", "base64");
             msg.put("Content", Base64.getEncoder().encodeToString(bytes));
@@ -96,16 +97,20 @@ public class ClientConnection {
 
     private void listen() {
         try {
-            while (true) {
+            while (running) {
                 ProtocolMessage msg = MessageParser.readMessage(reader);
-                if (msg == null || msg.keys().isEmpty()) continue;
+                if (msg == null) {
+                    window.append("Disconnected from server");
+                    break;
+                }
+                if (msg.keys().isEmpty()) continue;
                 handle(msg);
             }
         } catch (SocketTimeoutException e) {
             window.append("Connection timeout");
-            disconnect();
         } catch (Exception e) {
-            window.append("Disconnected");
+            window.append("Connection error: " + e.getMessage());
+        } finally {
             disconnect();
         }
     }
@@ -175,25 +180,28 @@ public class ClientConnection {
     }
 
     private void saveFile(ProtocolMessage msg) {
-        try {
-            JFileChooser chooser = new JFileChooser();
-            chooser.setSelectedFile(new File(msg.get("name")));
+        SwingUtilities.invokeLater(() -> {
+            try {
+                JFileChooser chooser = new JFileChooser();
+                chooser.setSelectedFile(new File(msg.get("name")));
 
-            if (chooser.showSaveDialog(null) == JFileChooser.APPROVE_OPTION) {
-                byte[] bytes = Base64.getDecoder().decode(msg.get("content"));
-                Files.write(chooser.getSelectedFile().toPath(), bytes);
-                JOptionPane.showMessageDialog(null, "File saved to " + chooser.getSelectedFile().getName());
-                window.append("File downloaded: " + msg.get("name"));
+                if (chooser.showSaveDialog(window) == JFileChooser.APPROVE_OPTION) {
+                    byte[] bytes = Base64.getDecoder().decode(msg.get("content").replace("\n", "").replace(" ", ""));
+                    Files.write(chooser.getSelectedFile().toPath(), bytes);
+                    JOptionPane.showMessageDialog(window, "File saved to " + chooser.getSelectedFile().getName());
+                    window.append("File downloaded: " + msg.get("name"));
+                }
+            } catch (Exception e) {
+                e.printStackTrace();
+                window.append("Failed to save file: " + e.getMessage());
             }
-        } catch (Exception e) {
-            e.printStackTrace();
-            window.append("Failed to save file: " + e.getMessage());
-        }
+        });
     }
 
     private void disconnect() {
+        running = false;
         try {
-            if (socket != null) socket.close();
+            if (socket != null && !socket.isClosed()) socket.close();
         } catch (IOException ignored) {}
     }
 

@@ -8,7 +8,7 @@ public class LoginWindow extends JFrame {
         setTitle("Login");
         setSize(300, 200);
         JTextField hostField = new JTextField("localhost");
-        JTextField portField = new JTextField("5000");
+        JTextField portField = new JTextField("8888");
         JTextField userField = new JTextField();
         JPasswordField passField = new JPasswordField();
         JButton connectButton = new JButton("Connect");

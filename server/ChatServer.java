@@ -5,14 +5,12 @@ import java.io.*;
 import java.net.*;
 import java.util.concurrent.*;
 import java.util.*;
-import java.util.logging.*;
 
 public class ChatServer {
     private final int port;
     private final int historyMax;
     private final Map<String, ClientHandler> clients = new ConcurrentHashMap<>();
     private final List<ProtocolMessage> history = new CopyOnWriteArrayList<>();
-    private static final Logger logger = Logger.getLogger("ChatServer");
     private static boolean logEnabled;
     private static String logFile;
 
@@ -42,20 +40,24 @@ public class ChatServer {
     public ClientHandler getClient(String name) { return clients.get(name); }
 
     public void broadcast(ProtocolMessage msg) {
-        if (history.size() >= historyMax) history.remove(0);
-        history.add(msg);
+        String event = msg.get("event");
+        if ("message".equalsIgnoreCase(event) || "file".equalsIgnoreCase(event)) {
+            if (history.size() >= historyMax) history.remove(0);
+            history.add(msg);
+        }
         for (ClientHandler c : clients.values()) c.send(msg);
-        log("Broadcast: " + msg.get("event"));
+        log("Broadcast event: " + event);
     }
 
     public List<ProtocolMessage> getHistory() { return history; }
 
     public static void log(String msg) {
         if (logEnabled) {
-            System.out.println("[" + new Date() + "] " + msg);
+            String logEntry = "[" + new Date() + "] " + msg;
+            System.out.println(logEntry);
             if (logFile != null) {
                 try (FileWriter fw = new FileWriter(logFile, true)) {
-                    fw.write("[" + new Date() + "] " + msg + "\n");
+                    fw.write(logEntry + "\n");
                 } catch (IOException e) { e.printStackTrace(); }
             }
         }
@@ -66,7 +68,7 @@ public class ChatServer {
         try (FileInputStream fis = new FileInputStream("server.properties")) { p.load(fis); }
         catch (FileNotFoundException e) { System.err.println("server.properties not found, using defaults"); }
 
-        int port = Integer.parseInt(p.getProperty("server.port", "5000"));
+        int port = Integer.parseInt(p.getProperty("server.port", "8888"));
         logEnabled = Boolean.parseBoolean(p.getProperty("log.enabled", "true"));
         logFile = p.getProperty("log.file", null);
         int historyMax = Integer.parseInt(p.getProperty("history.max", "100"));
