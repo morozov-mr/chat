@@ -213,4 +213,6 @@ public class ClientConnection {
             window.append("Failed to send: " + e.getMessage());
         }
     }
+
+
 }

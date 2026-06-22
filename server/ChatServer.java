@@ -21,7 +21,7 @@ public class ChatServer {
         log("Server started on port " + port);
         while (true) {
             Socket socket = serverSocket.accept();
-            socket.setSoTimeout(300000);
+            socket.setSoTimeout(3000000);
             new Thread(new ClientHandler(socket, this)).start();
         }
     }

@@ -64,6 +64,7 @@ public class ChatWindow extends JFrame {
             }
         });
 
+
         fileButton.addActionListener(e -> {
             JFileChooser chooser = new JFileChooser();
             if (chooser.showOpenDialog(this) == JFileChooser.APPROVE_OPTION)

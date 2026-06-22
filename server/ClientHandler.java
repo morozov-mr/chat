@@ -40,7 +40,7 @@ public class ClientHandler implements Runnable {
     }
 
     private void handle(ProtocolMessage msg) throws Exception {
-        String command = msg.get("command");
+        String command = msg.get("Command");
         if (command == null) return;
 
         switch (command.toLowerCase()) {
@@ -69,8 +69,8 @@ public class ClientHandler implements Runnable {
     }
 
     private void login(ProtocolMessage msg) throws Exception {
-        username = msg.get("name");
-        String password = msg.get("password");
+        username = msg.get("Name");
+        String password = msg.get("Password");
         if (username == null || username.isBlank()) {
             sendError("Username required");
             running = false;
@@ -114,9 +114,8 @@ public class ClientHandler implements Runnable {
     }
 
     private void sendMessage(ProtocolMessage msg) {
-        String text = msg.get("message");
+        String text = msg.get("Message");
         if (text == null || text.isBlank()) { sendError("Message cannot be empty"); return; }
-
 
         ProtocolMessage response = new ProtocolMessage();
         response.put("Status", "success");
@@ -129,6 +128,7 @@ public class ClientHandler implements Runnable {
         server.broadcast(event);
         ChatServer.log(username + " sent message");
     }
+
 
     private void sendUserList() {
         ProtocolMessage response = new ProtocolMessage();
@@ -144,9 +144,12 @@ public class ClientHandler implements Runnable {
     }
 
     private void uploadFile(ProtocolMessage msg) throws Exception {
-        String name = msg.get("name");
-        String content = msg.get("content");
-        if (name == null || content == null) { sendError("File name and content required"); return; }
+        String name = msg.get("Name");
+        String content = msg.get("Content");
+        if (name == null || content == null) {
+            sendError("File name and content required");
+            return;
+        }
 
         String fileId = java.util.UUID.randomUUID().toString();
         FileStorage.save(fileId, msg);
@@ -163,27 +166,33 @@ public class ClientHandler implements Runnable {
         event.put("From", username);
         event.put("Name", name);
         event.put("Size", String.valueOf(bytes.length));
-        event.put("MimeType", msg.get("mimetype"));
+        event.put("MimeType", msg.get("MimeType"));
         server.broadcast(event);
         ChatServer.log(username + " uploaded file: " + name + " (" + bytes.length + " bytes)");
     }
 
     private void downloadFile(ProtocolMessage msg) throws Exception {
-        String fileId = msg.get("fileid");
-        if (fileId == null) { sendError("FileId required"); return; }
+        String fileId = msg.get("FileId");
+        if (fileId == null) {
+            sendError("FileId required");
+            return;
+        }
 
-        ProtocolMessage stored = FileStorage.load(fileId);
-        if (stored == null) { sendError("File not found"); return; }
+        ProtocolMessage stored = FileStorage.load(fileId);  // Загружает с диска
+        if (stored == null) {
+            sendError("File not found");
+            return;
+        }
 
         ProtocolMessage response = new ProtocolMessage();
         response.put("Status", "success");
         response.put("FileId", fileId);
-        response.put("Name", stored.get("name"));
-        response.put("MimeType", stored.get("mimetype") != null ? stored.get("mimetype") : "application/octet-stream");
+        response.put("Name", stored.get("Name"));
+        response.put("MimeType", stored.get("MimeType"));
         response.put("Encoding", "base64");
-        response.put("Content", stored.get("content"));
+        response.put("Content", stored.get("Content"));
         send(response);
-        ChatServer.log(username + " downloaded file: " + stored.get("name"));
+        ChatServer.log(username + " downloaded file: " + stored.get("Name"));
     }
 
     private void sendError(String message) {
